@@ -1,5 +1,9 @@
 # GHCNh Enhanced StationDataset: Pandas DatetimeIndex & Advanced Features
 
+> **Note:** This documentation is a **work in progress** and may not fully reflect the latest code. Please refer to `ghcnh/ghcnh.py` for the most up-to-date implementation. Some features and behaviors may change as development continues.
+
+---
+
 This toolkit provides a powerful, user-friendly interface for working with GHCNh (Global Historical Climatology Network - Hourly) station data. It features:
 
 - **Native pandas DatetimeIndex support** for all time operations
@@ -25,12 +29,12 @@ This toolkit provides a powerful, user-friendly interface for working with GHCNh
 - **`get_time_index()`**: Returns the time coordinate as a pandas `DatetimeIndex`
 - **`get_time_range()`**: Returns start/end time, duration, and observation count
 - **`to_local_time(timezone: str)`**: Converts UTC times to any timezone
-- **`add_local_time()`**: Automatically detects timezone from station coordinates
+- **`add_local_time()`**: Automatically detects timezone from station coordinates (requires `timezonefinder`)
 
 ### 3. Variable Selection & Convenience Methods
 
 - **`select_variables(variables: List[str])`**: Select variables and their metadata columns
-- Convenience methods:  
+- Convenience methods:
   - `get_temperature()`
   - `get_precipitation()`
   - `get_wind()`
@@ -42,10 +46,9 @@ This toolkit provides a powerful, user-friendly interface for working with GHCNh
 
 ### 4. Quality Control
 
-- **`apply_quality_filter(strict: bool = False)`**: Filter data using GHCNh QC codes
-  - Permissive (default): keeps data not clearly bad
-  - Strict: only keeps clearly good data
+- **`apply_quality_filter(strict: bool = False)`**: *(Not yet implemented in code, see below)*
 - **`clean()`**: Basic cleaning utility to handle missing values and drop rows failing QC for core variables
+- **`qc_and_split_by_source_station(variable, ...)`**: Split and QC by source station for a variable
 
 ### 5. Data Analysis & Reporting
 
@@ -61,6 +64,13 @@ This toolkit provides a powerful, user-friendly interface for working with GHCNh
 
 - **`export_to_csv(filepath, variables=None)`**: Export to CSV (all or selected variables)
 - **`export_to_netcdf(filepath, variables=None)`**: Export to NetCDF
+- **`to_xarray()`**: Convert to xarray Dataset
+- **`to_dataframe()`**: Get pandas DataFrame
+- **`to_pandas_series(variable)`**: Get pandas Series for a variable
+
+### 8. Aggregation
+
+- **`aggregate(variable, freq="1h", method="mean")`**: Resample a variable to a new frequency using a specified aggregation method
 
 ---
 
@@ -71,7 +81,6 @@ This toolkit provides a powerful, user-friendly interface for working with GHCNh
 ```python
 from ghcnh.ghcnh import StationDataset, download_station_file
 
-# Download and load data
 data_path = download_station_file("USW00023183", year=2023)
 ds = StationDataset.from_file(data_path)
 
@@ -118,8 +127,8 @@ temp_data.export_to_csv("temperature_data.csv")
 ### Quality Control & Reporting
 
 ```python
-# Apply quality filtering
-clean_data = ds.apply_quality_filter(strict=False)
+# Clean data (handle missing, drop rows failing core QC)
+clean_data = ds.clean()
 
 # Generate quality report
 report = ds.get_quality_report()
@@ -131,27 +140,26 @@ if report['quality_issues']:
 
 ---
 
-## API Reference
+## API Reference (Work in Progress)
 
 ### Time Utilities
 
 - **`get_time_index()`**: Returns `DatetimeIndex`
 - **`get_time_range()`**: Returns dict with `start_time`, `end_time`, `duration_days`, `total_observations`
 - **`to_local_time(timezone: str)`**: Returns new dataset with local time
-- **`add_local_time()`**: Adds local time column (auto-detects timezone)
+- **`add_local_time()`**: Adds local time column (auto-detects timezone, requires `timezonefinder`)
 
 ### Variable Selection
 
 - **`select_variables(variables: List[str])`**: Selects variables and metadata columns
-- **Convenience methods**:  
+- **Convenience methods**:
   - `get_temperature()`, `get_precipitation()`, `get_wind()`, `get_pressure()`, `get_humidity()`, `get_visibility()`, `get_clouds()`, `get_extended_precipitation()`
 
 ### Quality Control
 
-- **`apply_quality_filter(strict: bool = False)`**: Filters data by QC codes
-  - **Strict mode:** Only numeric codes `0`, `1`, `4`, `5`, `9` and legacy codes `313`, `346` are accepted; any letter code is considered bad and masked.
-  - **Permissive mode:** Numeric codes `0` through `8` and legacy codes `313`, `346` are accepted (legacy, more lenient behavior).
 - **`clean()`**: Cleans dataset by handling missing values and dropping rows failing QC for core variables
+- **`qc_and_split_by_source_station(variable, ...)`**: Splits and QCs by source station for a variable
+- **`apply_quality_filter(strict: bool = False)`**: *(Not yet implemented in code, see below)*
 
 ### Data Analysis
 
@@ -167,10 +175,13 @@ if report['quality_issues']:
 
 - **`export_to_csv(filepath, variables=None)`**: Exports to CSV
 - **`export_to_netcdf(filepath, variables=None)`**: Exports to NetCDF
+- **`to_xarray()`**: Convert to xarray Dataset
+- **`to_dataframe()`**: Get pandas DataFrame
+- **`to_pandas_series(variable)`**: Get pandas Series for a variable
 
 ### Aggregation
 
-- **`aggregate(freq: str = "1h")`**: Resample to a new frequency using variable-aware aggregation rules
+- **`aggregate(variable, freq="1h", method="mean")`**: Resample a variable to a new frequency using a specified aggregation method
 
 ---
 
@@ -183,70 +194,40 @@ if report['quality_issues']:
 
 ## Time-based Operations
 
-- **Filtering**:  
+- **Filtering**:
   ```python
   jan_mask = (time_index >= '2023-01-01') & (time_index < '2023-02-01')
   jan_data = temp_series[jan_mask]
   ```
-- **Resampling**:  
+- **Resampling**:
   ```python
   daily_temp = temp_series.resample('D').mean()
   hourly_temp = temp_series.resample('H').mean()
   ```
-- **Timezone conversion**:  
+- **Timezone conversion**:
   ```python
   local_time = time_index.tz_convert('America/New_York')
   ```
 
 ---
 
-## Quality Control Details
+## Quality Control Details (Work in Progress)
 
-- **Good QC Codes (as used in code):**
-  - **Strict mode:** Only numeric codes `0`, `1`, `4`, `5`, `9` (meaning "passed" or "not flagged" per GHCNh documentation) and legacy codes `313`, `346` are accepted. **Any letter code (e.g., 'L', 'F', etc.) is considered bad and will be masked.**
-  - **Permissive mode:** Numeric codes `0` through `8` and legacy codes `313`, `346` are accepted (legacy behavior, more lenient).
-- **Bad QC Codes (filtered by default):**
-  - Numeric codes `2`, `3`, `6`, `7` (suspect/erroneous per docs)
-  - Any letter code (e.g., `L`, `F`, `K`, etc.) means a specific check failed and is considered bad
-- The `apply_quality_filter` method uses these codes to mask or drop bad data. The `clean()` method drops rows failing QC for core variables.
-- **Note:** The strict mode is now fully aligned with the official GHCNh documentation for maximum data reliability.
+- **Good QC Codes:**
+  - See `_GOOD_QC_CODES` in `ghcnh.py` (currently only used in `qc_and_split_by_source_station`)
+- **Bad QC Codes:**
+  - See `_BAD_QC` in `ghcnh.py`
+- **`clean()`**: Drops rows failing QC for core variables, replaces missing/trace values
+- **`qc_and_split_by_source_station()`**: Masks bad QC for a variable, splits by source station
+- **`apply_quality_filter()`**: *Not yet implemented in code*
 
 ---
 
 ## Cleaning vs. Quality Filtering: `clean()` vs. `apply_quality_filter()`
 
-The toolkit provides two main methods for data cleaning and quality control:
-
-### `clean()`
-- **Purpose:** Broad, basic cleaning of the dataset.
-- **Actions:**
-  - Replaces sentinel missing values (e.g., -9999, 9999, empty string) with `np.nan` for all numeric columns.
-  - Sets trace precipitation values (e.g., 'T', 'Trace') to 0.0 in the `precipitation` column.
-  - **Drops entire rows** where any *core variable* (temperature, dew point, wind speed, wind direction, precipitation, solar radiation) has a "bad" QC code.
-- **Result:** Returns a new dataset with all rows failing core variable QC removed, and missing/trace values handled.
-
-### `apply_quality_filter(strict: bool = False)`
-- **Purpose:** Flexible, per-variable quality control without dropping rows.
-- **Actions:**
-  - For each variable with a QC column:
-    - **Strict mode:** Only accepts numeric QC codes `0`, `1`, `4`, `5`, `9` and legacy codes `313`, `346` (per official documentation). **Any letter code is considered bad and masked.**
-    - **Permissive mode:** Accepts numeric codes `0` through `8` and legacy codes `313`, `346` (legacy, more lenient behavior).
-    - For any value not in the "good" list, that variable’s value is set to `np.nan` for those observations.
-  - **Does not drop rows**—just masks out “bad” values for each variable independently.
-  - The `strict` flag controls how selective the filter is.
-- **Result:** Returns a new dataset where “bad” values are masked (set to `np.nan`), but the structure and length of the dataset is preserved.
-
-### Summary Table
-
-| Method                | Handles Missing/Trace | Drops Rows | Masks Bad Values | Per-Variable Control | QC Strictness Option |
-|-----------------------|----------------------|-----------|------------------|---------------------|----------------------|
-| `clean()`             | Yes                  | Yes       | No               | No                  | No                   |
-| `apply_quality_filter`| No                   | No        | Yes              | Yes                 | Yes (`strict`)       |
-
-### When to Use Which?
-- **Use `clean()`** when you want a quick, broad cleaning: remove all rows with any core variable failing QC, and handle missing/trace values.
-- **Use `apply_quality_filter()`** when you want to keep the full dataset but mask out only the “bad” values for each variable, with optional strictness.
-- **For maximum reliability, use `apply_quality_filter(strict=True)` to ensure only the highest-quality data is retained, as defined by the official GHCNh documentation.**
+- **`clean()`**: Handles missing values, sets trace precipitation to 0, drops rows failing QC for core variables
+- **`apply_quality_filter()`**: *Not yet implemented in code*
+- **`qc_and_split_by_source_station()`**: For a variable, splits by source station, masks bad QC, drops NaN, returns dict of StationDataset
 
 ---
 
@@ -264,7 +245,7 @@ The toolkit provides two main methods for data cleaning and quality control:
 ## File Structure
 
 - `ghcnh/ghcnh.py` - Main code with enhanced features and pandas DatetimeIndex support
-- `ghcnh/example_pandas_datetime.py` - Example usage script
+- `ghcnh/example_pandas_datetime.py` - Example usage script *(not present, update as needed)*
 - `ghcnh/README.md` - This documentation
 
 ---
@@ -277,7 +258,7 @@ The toolkit provides two main methods for data cleaning and quality control:
 - **Built-in Resampling**: Easy aggregation to different time frequencies
 - **Better Integration**: Works seamlessly with pandas/xarray ecosystem
 - **Type Safety**: Proper type hints and error handling
-- **Comprehensive Quality Control**: Robust QC filtering and reporting
+- **Comprehensive Quality Control**: Robust QC filtering and reporting (WIP)
 - **Flexible Export**: CSV and NetCDF support
 
 ---
@@ -310,8 +291,8 @@ temp_data = ds.get_temperature()
 temp_stats = temp_data.get_summary_statistics()
 print(f"Temperature mean: {temp_stats['temperature']['mean']:.2f}°C")
 
-# Apply quality filtering
-clean_data = ds.apply_quality_filter(strict=False)
+# Clean data (handle missing, drop rows failing core QC)
+clean_data = ds.clean()
 
 # Export filtered data
 clean_data.export_to_csv("clean_station_data.csv")
