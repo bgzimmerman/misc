@@ -33,15 +33,12 @@ _MISSING_VALUES = {-9999, -9999.9, -999, -999.9, 9999, 9999.9, "", np.nan}
 # Measurement codes for trace precipitation
 _TRACE_CODES = {"T", "Trace", "trace", "2-Trace", "2"}
 
-# Good QC codes by source (updated for strictness per official documentation)
+# Good QC codes by source
 _GOOD_QC_CODES = {
-    # For strict QC: only codes that mean 'passed' or 'not flagged' per GHCNh documentation
-    "strict_general": ["0", "1", "4", "5", "9"],  # Numeric codes: passed or not flagged
-    "strict_legacy_313_346": ["313", "346"],        # Legacy codes (if present)
-    # For permissive QC: allow all numeric codes 0-8 (legacy behavior)
-    "permissive_general": [str(i) for i in range(0, 9)],
-    "permissive_legacy_313_346": ["313", "346"]
+    "source_code_set_1": ["0", "1", "4", "5", "9", "A", "U", "P", "I", "M", "C", "R"],
 }
+
+
 
 # QC values considered *bad* – will be filtered (updated for strictness)
 # Any letter code means a specific check failed and is considered bad
@@ -197,7 +194,8 @@ def download_station_file(
     """Download *station-year* or *period-of-record* file, returning **local path**."""
     url = _build_url(station, year=year, fmt=fmt)
     fname = pathlib.Path(cache_dir) / url.split("/")[-1]
-    return _stream_to_file(url, fname)
+    path = _stream_to_file(url, fname)
+    return path
 
 
 def open_ghcnh_dataframe(path: str | pathlib.Path) -> pd.DataFrame:
@@ -243,6 +241,13 @@ class StationDataset:
     _df: pd.DataFrame
     _meta: Dict[str, str] = field(default_factory=dict)
 
+    def __post_init__(self):
+        # Populate _meta with station metadata if present in the DataFrame
+        meta_fields = ["STATION", "Station_name", "LATITUDE", "LONGITUDE", "ELEVATION"]
+        for field in meta_fields:
+            if field not in self._meta and field in self._df.columns and len(self._df) > 0:
+                self._meta[field] = self._df[field].iloc[0]
+
     # ------------------------------------------------------------------
     # Constructors
     # ------------------------------------------------------------------
@@ -263,6 +268,7 @@ class StationDataset:
     # ------------------------------------------------------------------
     # Time handling utilities
     # ------------------------------------------------------------------
+
     
     def get_time_index(self) -> pd.DatetimeIndex:
         """Get the time index as a pandas DatetimeIndex."""
@@ -367,21 +373,6 @@ class StationDataset:
             trace_mask = df["precipitation_Measurement_Code"].isin(list(_TRACE_CODES))
             if "precipitation" in df.columns:
                 df.loc[trace_mask, "precipitation"] = 0.0
-
-        # drop rows failing QC for any *core* variable
-        bad_row = None
-        for var in _CORE_VARS:
-            qc = f"{var}_Quality_Code"
-            if qc in df.columns:
-                bad = df[qc].isin(list(_BAD_QC))
-                bad_row = bad if bad_row is None else (bad_row | bad)
-        if bad_row is not None:
-            # Ensure result is a DataFrame
-            if isinstance(df, pd.DataFrame):
-                df = df[~bad_row]
-            else:
-                df = pd.DataFrame(df)
-
         # Ensure only DataFrame is passed
         if not isinstance(df, pd.DataFrame):
             df = pd.DataFrame(df)
@@ -423,7 +414,7 @@ class StationDataset:
                     columns_to_keep.append(col)
         
         # Also keep station metadata
-        for col in ['LATITUDE', 'LONGITUDE', 'ELEVATION']:
+        for col in ['STATION', 'Station_name','LATITUDE', 'LONGITUDE', 'ELEVATION']:
             if col in self._df.columns:
                 columns_to_keep.append(col)
         
@@ -468,41 +459,6 @@ class StationDataset:
         """Get all precipitation variables (hourly, 3h, 6h, etc.) with quality control."""
         precip_vars = [var for var in _AVAILABLE_VARS.keys() if 'precipitation' in var]
         return self.select_variables(precip_vars)
-
-    def apply_quality_filter(self, strict: bool = False) -> "StationDataset":
-        """Apply quality control filtering to the dataset.
-        
-        Args:
-            strict: If True, use stricter QC criteria. If False, use more permissive criteria.
-            
-        Returns:
-            New StationDataset with quality-filtered data
-        """
-        df = self._df.copy()
-        
-        # Define QC criteria based on strictness
-        if strict:
-            # Strict QC - only keep truly good data per documentation
-            good_qc = _GOOD_QC_CODES["strict_general"] + _GOOD_QC_CODES["strict_legacy_313_346"]
-        else:
-            # Permissive QC - legacy behavior
-            good_qc = _GOOD_QC_CODES["permissive_general"] + _GOOD_QC_CODES["permissive_legacy_313_346"]
-        
-        # Apply QC filtering for each variable
-        for var, qc_col in _AVAILABLE_VARS.items():
-            if var in df.columns and qc_col in df.columns:
-                # Create mask for good quality data
-                # For strict mode, also mask any letter code (failed check)
-                if strict:
-                    # Good if in good_qc and not a letter code
-                    good_mask = df[qc_col].isin(good_qc) & df[qc_col].apply(lambda x: isinstance(x, (int, float)) or (isinstance(x, str) and x.isdigit()))
-                else:
-                    # Permissive: allow all numeric codes 0-8 and legacy
-                    good_mask = df[qc_col].isin(good_qc)
-                # Apply mask to the variable
-                df.loc[~good_mask, var] = np.nan
-        
-        return StationDataset(df, _meta=self._meta.copy())
 
     def get_data_availability(self) -> Dict[str, Dict[str, Any]]:
         """Get data availability statistics for all variables.
@@ -648,7 +604,7 @@ class StationDataset:
                     # Identify potential issues
                     issues = []
                     for code, count in qc_counts.items():
-                        if code not in _GOOD_QC_CODES["general"]:
+                        if code not in _GOOD_QC_CODES["source_code_set_1"]:
                             issues.append(f"QC code '{code}': {count} observations")
                     
                     if issues:
@@ -659,23 +615,20 @@ class StationDataset:
     # ------------------------------------------------------------------
     # Aggregation
     # ------------------------------------------------------------------
-    def aggregate(self, freq: str = "1h") -> "StationDataset":
+    def aggregate(
+        self, 
+        variable: str = "temperature", 
+        freq: str = "1h", 
+        method: str = "mean"
+        ) -> "StationDataset":
         """Resample to *freq* using variable-aware aggregation rules."""
-        df = self._df.copy()
+        df = self._df.copy()[variable]
         
         # Create resampler
         resampler = df.resample(freq)
         
-        # Apply variable-specific aggregation
-        agg_dict = {}
-        for var in df.columns:
-            if var in _CORE_VARS:
-                agg_dict[var] = _CORE_VARS[var]
-            else:
-                agg_dict[var] = 'mean'  # default aggregation
-        
         # Perform aggregation
-        aggregated_df = resampler.agg(agg_dict)
+        aggregated_df = resampler.agg(method)
         # Ensure only DataFrame is passed
         if not isinstance(aggregated_df, pd.DataFrame):
             aggregated_df = pd.DataFrame(aggregated_df)
@@ -708,6 +661,62 @@ class StationDataset:
         result = self._df[variable]
         if not isinstance(result, pd.Series):
             result = pd.Series(result)
+        return result
+
+    def qc_and_split_by_source_station(
+        self, variable: str, out_dir: str = "ghcnh_cache/cleaned", strict: bool = False
+    ):
+        """
+        For a given variable, drop rows with NaN Source_Station_ID, split by unique source station,
+        apply QC, and return a dict mapping source_station_id to a new StationDataset for each cleaned sub-DataFrame.
+        Ensures DATE and station metadata columns are included. Source_Code is saved as stringified int.
+        """
+        src_col = f"{variable}_Source_Station_ID"
+        qc_col = f"{variable}_Quality_Code"
+        code_col = f"{variable}_Source_Code"
+        # Metadata columns to always keep if present
+        meta_cols = [
+            "time", "STATION", "Station_name", "LATITUDE", "LONGITUDE"
+        ]
+        if src_col not in self._df.columns or qc_col not in self._df.columns:
+            raise ValueError(f"Required columns for {variable} not found in dataset")
+
+        # 1. Drop rows with NaN Source_Station_ID
+        df = self._df.dropna(subset=[src_col]).copy()
+
+        result = {}
+        # 2. Split by unique source station
+        for source_station in df[src_col].unique():
+            sub_df = df[df[src_col] == source_station].copy()
+            good_qc = _GOOD_QC_CODES["source_code_set_1"]
+            # Set bad QC values to NaN for the variable
+            mask = ~sub_df[qc_col].isin(good_qc)
+            sub_df.loc[mask, variable] = np.nan
+            # Optionally, drop rows where variable is now NaN
+            sub_df = sub_df.dropna(subset=[variable])
+            # Ensure DATE and station metadata columns are present if available
+            keep_cols = meta_cols + [
+                c for c in [
+                    variable,
+                    f"{variable}_Measurement_Code",
+                    f"{variable}_Quality_Code",
+                    f"{variable}_Report_Type",
+                    f"{variable}_Source_Code",
+                    f"{variable}_Source_Station_ID",
+                ] if c in sub_df.columns
+            ]
+            # Ensure Source_Code is saved as stringified int (no .0)
+            if code_col in sub_df.columns:
+                sub_df.loc[:, code_col] = (
+                    sub_df.loc[:, code_col]
+                    .astype(float)
+                    .astype(int)
+                    .astype(str)
+                )
+            # Only keep the columns in keep_cols if they exist, but preserve all columns in the DataFrame
+            # (for downstream flexibility)
+            # Return as a new StationDataset
+            result[source_station] = StationDataset(sub_df, _meta=self._meta.copy())
         return result
 
     # ------------------------------------------------------------------
