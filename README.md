@@ -45,6 +45,7 @@ This toolkit provides a powerful, user-friendly interface for working with GHCNh
 - **`apply_quality_filter(strict: bool = False)`**: Filter data using GHCNh QC codes
   - Permissive (default): keeps data not clearly bad
   - Strict: only keeps clearly good data
+- **`clean()`**: Basic cleaning utility to handle missing values and drop rows failing QC for core variables
 
 ### 5. Data Analysis & Reporting
 
@@ -68,7 +69,7 @@ This toolkit provides a powerful, user-friendly interface for working with GHCNh
 ### Basic Usage
 
 ```python
-from ghcnh_gpt import StationDataset, download_station_file
+from ghcnh.ghcnh import StationDataset, download_station_file
 
 # Download and load data
 data_path = download_station_file("USW00023183", year=2023)
@@ -148,6 +149,7 @@ if report['quality_issues']:
 ### Quality Control
 
 - **`apply_quality_filter(strict: bool = False)`**: Filters data by QC codes
+- **`clean()`**: Cleans dataset by handling missing values and dropping rows failing QC for core variables
 
 ### Data Analysis
 
@@ -164,12 +166,16 @@ if report['quality_issues']:
 - **`export_to_csv(filepath, variables=None)`**: Exports to CSV
 - **`export_to_netcdf(filepath, variables=None)`**: Exports to NetCDF
 
+### Aggregation
+
+- **`aggregate(freq: str = "1h")`**: Resample to a new frequency using variable-aware aggregation rules
+
 ---
 
 ## Available Variables
 
-- **Core**: `temperature`, `dew_point_temperature`, `wind_speed`, `wind_direction`, `precipitation`, `relative_humidity`, `station_level_pressure`, `visibility`, `wet_bulb_temperature`
-- **Extended**: `wind_gust`, `snow_depth`, `altimeter`, `pressure_3hr_change`, `sky_cover_1/2/3`, `sky_cover_baseht_1/2/3`, `precipitation_3h/6h/12h/24h`, etc.
+- **Core**: `temperature`, `dew_point_temperature`, `wind_speed`, `wind_direction`, `precipitation`, `solar_radiation`
+- **Extended**: `relative_humidity`, `station_level_pressure`, `visibility`, `wet_bulb_temperature`, `wind_gust`, `snow_depth`, `sea_level_pressure`, `sky_cover_1/2/3`, `sky_cover_baseht_1/2/3`, `precipitation_3h/6h/12h/24h`, `precipitation_estimated`, `solar_radiation_estimated`, `temperature_max/min`, `dew_point_temperature_max/min`, `relative_humidity_max/min`, `wind_speed_max/min`, `station_level_pressure_max/min`, `sea_level_pressure_max/min`
 
 ---
 
@@ -194,10 +200,12 @@ if report['quality_issues']:
 
 ## Quality Control Details
 
-- **General QC Codes**: 0, 1, 4, 5, 9, A, C, R, None, "9-Missing" = Good data
-- **Legacy QC Codes**: 0, 1, 4, 5, 9, A, U, P, I, M, C, R = Good data
-- **Source-specific codes**: Source 382: Blank, A, M, D, Q, q, R = Good; Source 345: 0 = Good
-- **Bad codes**: L, o, F, U, D, d, W, K, C, T, S, h, V, w, N, E, p, H, 2, 3, 6, 7
+- **Good QC Codes (as used in code):**
+  - General: `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`
+  - Legacy (313/346): `313`, `346`
+- **Bad QC Codes (filtered by default):**
+  - `2`, `3`, `4`, `6`, `7`, `8`, `9`, `K`, `E`, `w`, `N`
+- The `apply_quality_filter` method uses these codes to mask or drop bad data. The `clean()` method drops rows failing QC for core variables.
 
 ---
 
@@ -214,9 +222,9 @@ if report['quality_issues']:
 
 ## File Structure
 
-- `ghcnh_gpt.py` - Main code with enhanced features and pandas DatetimeIndex support
-- `example_pandas_datetime.py` - Example usage script
-- `README.md` - This documentation
+- `ghcnh/ghcnh.py` - Main code with enhanced features and pandas DatetimeIndex support
+- `ghcnh/example_pandas_datetime.py` - Example usage script
+- `ghcnh/README.md` - This documentation
 
 ---
 
@@ -245,7 +253,7 @@ if report['quality_issues']:
 ## Example: End-to-End Workflow
 
 ```python
-from ghcnh_gpt import StationDataset, download_station_file
+from ghcnh.ghcnh import StationDataset, download_station_file
 
 # Download and load data
 station_id = "USW00023183"
