@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import pathlib
 from dataclasses import dataclass, field
@@ -35,13 +33,23 @@ _MISSING_VALUES = {-9999, -9999.9, -999, -999.9, 9999, 9999.9, "", np.nan}
 # Measurement codes for trace precipitation
 _TRACE_CODES = {"T", "Trace", "trace", "2-Trace", "2"}
 
-# QC values considered *bad* – will be filtered
-_BAD_QC = {"2", "3", "4", "6", "7", "8", "9", "K", "E", "w", "N"}
-
-# Good QC codes by source
+# Good QC codes by source (updated for strictness per official documentation)
 _GOOD_QC_CODES = {
-    "general": ["0", "1", "2", "3", "4", "5", "6", "7", "8"],
-    "legacy_313_346": ["313", "346"]
+    # For strict QC: only codes that mean 'passed' or 'not flagged' per GHCNh documentation
+    "strict_general": ["0", "1", "4", "5", "9"],  # Numeric codes: passed or not flagged
+    "strict_legacy_313_346": ["313", "346"],        # Legacy codes (if present)
+    # For permissive QC: allow all numeric codes 0-8 (legacy behavior)
+    "permissive_general": [str(i) for i in range(0, 9)],
+    "permissive_legacy_313_346": ["313", "346"]
+}
+
+# QC values considered *bad* – will be filtered (updated for strictness)
+# Any letter code means a specific check failed and is considered bad
+_BAD_QC = {
+    # Numeric codes that mean suspect or erroneous
+    "2", "3", "6", "7",  # suspect/erroneous (per docs)
+    # Letter codes for failed checks (from documentation Table 3)
+    "L", "o", "F", "U", "D", "d", "W", "K", "C", "T", "S", "h", "V", "w", "N", "E", "p", "H"
 }
 
 # variable-specific aggregation semantics
@@ -368,8 +376,15 @@ class StationDataset:
                 bad = df[qc].isin(list(_BAD_QC))
                 bad_row = bad if bad_row is None else (bad_row | bad)
         if bad_row is not None:
-            df = df[~bad_row]
+            # Ensure result is a DataFrame
+            if isinstance(df, pd.DataFrame):
+                df = df[~bad_row]
+            else:
+                df = pd.DataFrame(df)
 
+        # Ensure only DataFrame is passed
+        if not isinstance(df, pd.DataFrame):
+            df = pd.DataFrame(df)
         return StationDataset(df, _meta=self._meta.copy())
 
     def select_variables(self, variables: List[str]) -> "StationDataset":
@@ -414,6 +429,9 @@ class StationDataset:
         
         # Create new dataset with selected variables
         selected_df = self._df[columns_to_keep]
+        # Ensure only DataFrame is passed
+        if not isinstance(selected_df, pd.DataFrame):
+            selected_df = pd.DataFrame(selected_df)
         return StationDataset(selected_df, _meta=self._meta.copy())
 
     # Convenience methods for common variable groups
@@ -464,18 +482,23 @@ class StationDataset:
         
         # Define QC criteria based on strictness
         if strict:
-            # Stricter QC - only keep clearly good data
-            good_qc = _GOOD_QC_CODES["general"]
+            # Strict QC - only keep truly good data per documentation
+            good_qc = _GOOD_QC_CODES["strict_general"] + _GOOD_QC_CODES["strict_legacy_313_346"]
         else:
-            # More permissive QC - keep data that's not clearly bad
-            good_qc = _GOOD_QC_CODES["general"] + _GOOD_QC_CODES["legacy_313_346"]
+            # Permissive QC - legacy behavior
+            good_qc = _GOOD_QC_CODES["permissive_general"] + _GOOD_QC_CODES["permissive_legacy_313_346"]
         
         # Apply QC filtering for each variable
         for var, qc_col in _AVAILABLE_VARS.items():
             if var in df.columns and qc_col in df.columns:
                 # Create mask for good quality data
-                good_mask = df[qc_col].isin(good_qc)
-                
+                # For strict mode, also mask any letter code (failed check)
+                if strict:
+                    # Good if in good_qc and not a letter code
+                    good_mask = df[qc_col].isin(good_qc) & df[qc_col].apply(lambda x: isinstance(x, (int, float)) or (isinstance(x, str) and x.isdigit()))
+                else:
+                    # Permissive: allow all numeric codes 0-8 and legacy
+                    good_mask = df[qc_col].isin(good_qc)
                 # Apply mask to the variable
                 df.loc[~good_mask, var] = np.nan
         
@@ -653,7 +676,9 @@ class StationDataset:
         
         # Perform aggregation
         aggregated_df = resampler.agg(agg_dict)
-        
+        # Ensure only DataFrame is passed
+        if not isinstance(aggregated_df, pd.DataFrame):
+            aggregated_df = pd.DataFrame(aggregated_df)
         return StationDataset(aggregated_df, _meta=self._meta.copy())
 
     # ------------------------------------------------------------------
@@ -679,7 +704,11 @@ class StationDataset:
         if variable not in self._df.columns:
             raise ValueError(f"Variable '{variable}' not found in dataset")
         
-        return self._df[variable]
+        # Ensure only Series is returned
+        result = self._df[variable]
+        if not isinstance(result, pd.Series):
+            result = pd.Series(result)
+        return result
 
     # ------------------------------------------------------------------
     # String representation
