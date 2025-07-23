@@ -149,6 +149,8 @@ if report['quality_issues']:
 ### Quality Control
 
 - **`apply_quality_filter(strict: bool = False)`**: Filters data by QC codes
+  - **Strict mode:** Only numeric codes `0`, `1`, `4`, `5`, `9` and legacy codes `313`, `346` are accepted; any letter code is considered bad and masked.
+  - **Permissive mode:** Numeric codes `0` through `8` and legacy codes `313`, `346` are accepted (legacy, more lenient behavior).
 - **`clean()`**: Cleans dataset by handling missing values and dropping rows failing QC for core variables
 
 ### Data Analysis
@@ -201,11 +203,50 @@ if report['quality_issues']:
 ## Quality Control Details
 
 - **Good QC Codes (as used in code):**
-  - General: `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`
-  - Legacy (313/346): `313`, `346`
+  - **Strict mode:** Only numeric codes `0`, `1`, `4`, `5`, `9` (meaning "passed" or "not flagged" per GHCNh documentation) and legacy codes `313`, `346` are accepted. **Any letter code (e.g., 'L', 'F', etc.) is considered bad and will be masked.**
+  - **Permissive mode:** Numeric codes `0` through `8` and legacy codes `313`, `346` are accepted (legacy behavior, more lenient).
 - **Bad QC Codes (filtered by default):**
-  - `2`, `3`, `4`, `6`, `7`, `8`, `9`, `K`, `E`, `w`, `N`
+  - Numeric codes `2`, `3`, `6`, `7` (suspect/erroneous per docs)
+  - Any letter code (e.g., `L`, `F`, `K`, etc.) means a specific check failed and is considered bad
 - The `apply_quality_filter` method uses these codes to mask or drop bad data. The `clean()` method drops rows failing QC for core variables.
+- **Note:** The strict mode is now fully aligned with the official GHCNh documentation for maximum data reliability.
+
+---
+
+## Cleaning vs. Quality Filtering: `clean()` vs. `apply_quality_filter()`
+
+The toolkit provides two main methods for data cleaning and quality control:
+
+### `clean()`
+- **Purpose:** Broad, basic cleaning of the dataset.
+- **Actions:**
+  - Replaces sentinel missing values (e.g., -9999, 9999, empty string) with `np.nan` for all numeric columns.
+  - Sets trace precipitation values (e.g., 'T', 'Trace') to 0.0 in the `precipitation` column.
+  - **Drops entire rows** where any *core variable* (temperature, dew point, wind speed, wind direction, precipitation, solar radiation) has a "bad" QC code.
+- **Result:** Returns a new dataset with all rows failing core variable QC removed, and missing/trace values handled.
+
+### `apply_quality_filter(strict: bool = False)`
+- **Purpose:** Flexible, per-variable quality control without dropping rows.
+- **Actions:**
+  - For each variable with a QC column:
+    - **Strict mode:** Only accepts numeric QC codes `0`, `1`, `4`, `5`, `9` and legacy codes `313`, `346` (per official documentation). **Any letter code is considered bad and masked.**
+    - **Permissive mode:** Accepts numeric codes `0` through `8` and legacy codes `313`, `346` (legacy, more lenient behavior).
+    - For any value not in the "good" list, that variable’s value is set to `np.nan` for those observations.
+  - **Does not drop rows**—just masks out “bad” values for each variable independently.
+  - The `strict` flag controls how selective the filter is.
+- **Result:** Returns a new dataset where “bad” values are masked (set to `np.nan`), but the structure and length of the dataset is preserved.
+
+### Summary Table
+
+| Method                | Handles Missing/Trace | Drops Rows | Masks Bad Values | Per-Variable Control | QC Strictness Option |
+|-----------------------|----------------------|-----------|------------------|---------------------|----------------------|
+| `clean()`             | Yes                  | Yes       | No               | No                  | No                   |
+| `apply_quality_filter`| No                   | No        | Yes              | Yes                 | Yes (`strict`)       |
+
+### When to Use Which?
+- **Use `clean()`** when you want a quick, broad cleaning: remove all rows with any core variable failing QC, and handle missing/trace values.
+- **Use `apply_quality_filter()`** when you want to keep the full dataset but mask out only the “bad” values for each variable, with optional strictness.
+- **For maximum reliability, use `apply_quality_filter(strict=True)` to ensure only the highest-quality data is retained, as defined by the official GHCNh documentation.**
 
 ---
 
